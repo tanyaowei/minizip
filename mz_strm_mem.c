@@ -1,5 +1,5 @@
 /* mz_strm_mem.c -- Stream for memory access
-   Version 2.4.0, August 5, 2018
+   Version 2.8.5, March 17, 2019
    part of the MiniZip project
 
    This interface is designed to access memory rather than files.
@@ -7,20 +7,16 @@
 
    Based on Unzip ioapi.c version 0.22, May 19th, 2003
 
-   Copyright (C) 2010-2018 Nathan Moinvaziri
+   Copyright (C) 2010-2019 Nathan Moinvaziri
      https://github.com/nmoinvaz/minizip
    Copyright (C) 2003 Justin Fletcher
    Copyright (C) 1998-2003 Gilles Vollant
-     http://www.winimage.com/zLibDll/minizip.html
+     https://www.winimage.com/zLibDll/minizip.html
 
    This program is distributed under the terms of the same license as zlib.
    See the accompanying LICENSE file for the full text of the license.
 */
 
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 #include "mz.h"
 #include "mz_strm.h"
@@ -48,23 +44,26 @@ static mz_stream_vtbl mz_stream_mem_vtbl = {
 typedef struct mz_stream_mem_s {
     mz_stream   stream;
     int32_t     mode;
-    char        *buffer;    // Memory buffer pointer
-    int32_t     size;       // Size of the memory buffer
-    int32_t     limit;      // Furthest we've written
-    int32_t     position;   // Current position in the memory
-    int32_t     grow_size;  // Size to grow when full
+    uint8_t     *buffer;    /* Memory buffer pointer */
+    int32_t     size;       /* Size of the memory buffer */
+    int32_t     limit;      /* Furthest we've written */
+    int32_t     position;   /* Current position in the memory */
+    int32_t     grow_size;  /* Size to grow when full */
 } mz_stream_mem;
 
 /***************************************************************************/
 
-static void mz_stream_mem_set_size(void *stream, int32_t size)
+static int32_t mz_stream_mem_set_size(void *stream, int32_t size)
 {
     mz_stream_mem *mem = (mz_stream_mem *)stream;
     int32_t new_size = size;
-    char *new_buf = NULL;
+    uint8_t *new_buf = NULL;
 
 
-    new_buf = (char *)MZ_ALLOC(new_size);
+    new_buf = (uint8_t *)MZ_ALLOC((uint32_t)new_size);
+    if (new_buf == NULL)
+        return MZ_BUF_ERROR;
+
     if (mem->buffer)
     {
         memcpy(new_buf, mem->buffer, mem->size);
@@ -73,11 +72,13 @@ static void mz_stream_mem_set_size(void *stream, int32_t size)
 
     mem->buffer = new_buf;
     mem->size = new_size;
+    return MZ_OK;
 }
 
 int32_t mz_stream_mem_open(void *stream, const char *path, int32_t mode)
 {
     mz_stream_mem *mem = (mz_stream_mem *)stream;
+    int32_t err = MZ_OK;
 
     MZ_UNUSED(path);
 
@@ -86,18 +87,18 @@ int32_t mz_stream_mem_open(void *stream, const char *path, int32_t mode)
     mem->position = 0;
 
     if (mem->mode & MZ_OPEN_MODE_CREATE)
-        mz_stream_mem_set_size(stream, mem->grow_size);
+        err = mz_stream_mem_set_size(stream, mem->grow_size);
     else
         mem->limit = mem->size;
 
-    return MZ_OK;
+    return err;
 }
 
 int32_t mz_stream_mem_is_open(void *stream)
 {
     mz_stream_mem *mem = (mz_stream_mem *)stream;
     if (mem->buffer == NULL)
-        return MZ_STREAM_ERROR;
+        return MZ_OPEN_ERROR;
     return MZ_OK;
 }
 
@@ -108,7 +109,7 @@ int32_t mz_stream_mem_read(void *stream, void *buf, int32_t size)
     if (size > mem->size - mem->position)
         size = mem->size - mem->position;
 
-    if (mem->position + size > mem->limit)
+    if ((size <= 0) || (mem->position + size > mem->limit))
         return 0;
 
     memcpy(buf, mem->buffer + mem->position, size);
@@ -121,6 +122,7 @@ int32_t mz_stream_mem_write(void *stream, const void *buf, int32_t size)
 {
     mz_stream_mem *mem = (mz_stream_mem *)stream;
     int32_t new_size = 0;
+    int32_t err = MZ_OK;
 
     if (size == 0)
         return size;
@@ -135,7 +137,9 @@ int32_t mz_stream_mem_write(void *stream, const void *buf, int32_t size)
             else
                 new_size += size;
 
-            mz_stream_mem_set_size(stream, new_size);
+            err = mz_stream_mem_set_size(stream, new_size);
+            if (err != MZ_OK)
+                return err;
         }
         else
         {
@@ -162,6 +166,7 @@ int32_t mz_stream_mem_seek(void *stream, int64_t offset, int32_t origin)
 {
     mz_stream_mem *mem = (mz_stream_mem *)stream;
     int64_t new_pos = 0;
+    int32_t err = MZ_OK;
 
     switch (origin)
     {
@@ -175,18 +180,24 @@ int32_t mz_stream_mem_seek(void *stream, int64_t offset, int32_t origin)
             new_pos = offset;
             break;
         default:
-            return MZ_STREAM_ERROR;
+            return MZ_SEEK_ERROR;
     }
 
     if (new_pos > mem->size)
     {
         if ((mem->mode & MZ_OPEN_MODE_CREATE) == 0)
-            return MZ_STREAM_ERROR;
+            return MZ_SEEK_ERROR;
 
-        mz_stream_mem_set_size(stream, (int32_t)new_pos);
+        err = mz_stream_mem_set_size(stream, (int32_t)new_pos);
+        if (err != MZ_OK)
+            return err;
+    }
+    else if (new_pos < 0)
+    {
+        return MZ_SEEK_ERROR;
     }
 
-    mem->position = (uint32_t)new_pos;
+    mem->position = (int32_t)new_pos;
     return MZ_OK;
 }
 
@@ -194,7 +205,7 @@ int32_t mz_stream_mem_close(void *stream)
 {
     MZ_UNUSED(stream);
 
-    // We never return errors
+    /* We never return errors */
     return MZ_OK;
 }
 
@@ -202,14 +213,14 @@ int32_t mz_stream_mem_error(void *stream)
 {
     MZ_UNUSED(stream);
 
-    // We never return errors
+    /* We never return errors */
     return MZ_OK;
 }
 
 void mz_stream_mem_set_buffer(void *stream, void *buf, int32_t size)
 {
     mz_stream_mem *mem = (mz_stream_mem *)stream;
-    mem->buffer = buf;
+    mem->buffer = (uint8_t *)buf;
     mem->size = size;
     mem->limit = size;
 }
@@ -223,9 +234,15 @@ int32_t mz_stream_mem_get_buffer_at(void *stream, int64_t position, const void *
 {
     mz_stream_mem *mem = (mz_stream_mem *)stream;
     if (buf == NULL || position < 0 || mem->size < position || mem->buffer == NULL)
-        return MZ_STREAM_ERROR;
+        return MZ_SEEK_ERROR;
     *buf = mem->buffer + position;
     return MZ_OK;
+}
+
+int32_t mz_stream_mem_get_buffer_at_current(void *stream, const void **buf)
+{
+    mz_stream_mem *mem = (mz_stream_mem *)stream;
+    return mz_stream_mem_get_buffer_at(stream, mem->position, buf);
 }
 
 void mz_stream_mem_get_buffer_length(void *stream, int32_t *length)
@@ -255,8 +272,7 @@ void *mz_stream_mem_create(void **stream)
     {
         memset(mem, 0, sizeof(mz_stream_mem));
         mem->stream.vtbl = &mz_stream_mem_vtbl;
-        // Large grow size to prevent fragmentation
-        mem->grow_size = 128 * 1024;
+        mem->grow_size = 4096;
     }
     if (stream != NULL)
         *stream = mem;

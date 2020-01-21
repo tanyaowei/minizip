@@ -1,10 +1,10 @@
 /* mz_strm_buf.h -- Stream for buffering reads/writes
-   Version 2.4.0, August 5, 2018
+   Version 2.8.5, March 17, 2019
    part of the MiniZip project
 
    This version of ioapi is designed to buffer IO.
 
-   Copyright (C) 2010-2018 Nathan Moinvaziri
+   Copyright (C) 2010-2019 Nathan Moinvaziri
       https://github.com/nmoinvaz/minizip
 
    This program is distributed under the terms of the same license as zlib.
@@ -13,8 +13,6 @@
 
 #ifndef MZ_STREAM_BUFFERED_H
 #define MZ_STREAM_BUFFERED_H
-
-#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
